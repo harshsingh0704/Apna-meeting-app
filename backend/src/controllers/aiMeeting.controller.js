@@ -86,3 +86,72 @@ export const summarizeMeeting = async (req, res) => {
     });
   }
 };
+
+
+
+
+export const summarizeMeetingWithTasks = async (req, res) => {
+  try {
+    const { meetingContext } = req.body;
+
+    if (!meetingContext || !meetingContext.trim()) {
+      return res.status(400).json({
+        message: "Meeting context is required",
+      });
+    }
+
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "You summarize meetings into bullet points and return action items as a list.",
+        },
+        {
+          role: "user",
+          content: `
+Summarize this meeting in bullet points.
+Also give action items in a JSON array.
+
+Meeting:
+${meetingContext}
+
+Return format strictly like this:
+SUMMARY:
+- point 1
+- point 2
+
+TASKS:
+- task 1
+- task 2
+`,
+        },
+      ],
+    });
+
+    const text = response.output_text || "";
+
+    // simple parsing
+    const summaryPart = text.split("TASKS:")[0]?.replace("SUMMARY:", "").trim();
+    const tasksPart = text.split("TASKS:")[1]?.trim();
+
+    const tasks = tasksPart
+      ? tasksPart
+          .split("\n")
+          .map((t) => t.replace("-", "").trim())
+          .filter(Boolean)
+      : [];
+
+    return res.status(200).json({
+      summary: summaryPart || "Summary not generated",
+      tasks,
+      raw: text,
+    });
+  } catch (error) {
+    console.error("AI SUMMARY TASK ERROR:", error?.message || error);
+    res.status(500).json({
+      message: "Summary failed",
+    });
+  }
+};

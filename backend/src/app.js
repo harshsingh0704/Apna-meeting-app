@@ -13,6 +13,15 @@ import userRoutes from "./routes/users.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 /* ============================================================ */
 
+
+
+
+import meetingRoutes from "./routes/meeting.routes.js";
+
+
+
+
+
 const app = express();
 const server = createServer(app);
 connectToSocket(server);
@@ -33,6 +42,13 @@ app.use("/api/v1/ai", aiRoutes);
    POST http://localhost:8000/api/v1/ai/ask
 */
 /* ==================================================== */
+
+
+
+app.use("/api/v1/meeting", meetingRoutes);
+
+
+
 
 const start = async () => {
   try {
