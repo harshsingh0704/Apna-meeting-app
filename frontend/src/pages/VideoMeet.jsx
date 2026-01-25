@@ -54,11 +54,16 @@ export default function VideoMeetComponent() {
 
     let [username, setUsername] = useState("");
 
-    // ================= AI CHAT STATES =================
+  // ================= AI CHAT STATES =================
 const [aiMessages, setAiMessages] = useState([]);
 const [aiInput, setAiInput] = useState("");
 const [aiLoading, setAiLoading] = useState(false);
+const [aiOpen, setAiOpen] = useState(false);
 // =================================================
+
+const [aiPos, setAiPos] = useState({ x: 60, y: 120 });
+const [dragging, setDragging] = useState(false);
+const dragOffset = useRef({ x: 0, y: 0 });
 
 
     const videoRef = useRef([])
@@ -427,13 +432,17 @@ const [aiLoading, setAiLoading] = useState(false);
         setScreen(!screen);
     }
 
-    let handleEndCall = () => {
-        try {
-            let tracks = localVideoref.current.srcObject.getTracks()
-            tracks.forEach(track => track.stop())
-        } catch (e) { }
-        window.location.href = "/"
-    }
+  let handleEndCall = async () => {
+  await saveSummaryToDB(); // ✅ meeting end pe summary save
+
+  try {
+    let tracks = localVideoref.current.srcObject.getTracks();
+    tracks.forEach((track) => track.stop());
+  } catch (e) {}
+
+  window.location.href = "/home";
+};
+
 
     let openChat = () => {
         setModal(true);
@@ -497,7 +506,8 @@ const [aiLoading, setAiLoading] = useState(false);
         : "No meeting messages yet.";
 
     // 3️⃣ Call backend AI
-    const res = await fetch("http://localhost:8000/api/v1/ai/ask", {
+    const res = await fetch(`${server_url}/api/v1/ai/ask`, {
+
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -536,6 +546,82 @@ const [aiLoading, setAiLoading] = useState(false);
 
 
 
+const onAiMouseDown = (e) => {
+  setDragging(true);
+  dragOffset.current = {
+    x: e.clientX - aiPos.x,
+    y: e.clientY - aiPos.y,
+  };
+};
+
+useEffect(() => {
+  const onMouseMove = (e) => {
+    if (!dragging) return;
+
+    setAiPos({
+      x: e.clientX - dragOffset.current.x,
+      y: e.clientY - dragOffset.current.y,
+    });
+  };
+
+  const onMouseUp = () => setDragging(false);
+
+  window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("mouseup", onMouseUp);
+
+  return () => {
+    window.removeEventListener("mousemove", onMouseMove);
+    window.removeEventListener("mouseup", onMouseUp);
+  };
+}, [dragging]);
+
+
+
+
+const saveSummaryToDB = async () => {
+  try {
+    const token = localStorage.getItem("token");
+
+    const meetingCode = window.location.pathname.replace("/", "");
+
+    const meetingContext =
+      messages.length > 0
+        ? messages.map((m) => `${m.sender}: ${m.data}`).join("\n")
+        : "No meeting messages yet.";
+
+    // 1️⃣ AI se summary + tasks lo
+    const res = await fetch(`${server_url}/api/v1/ai/summarize-tasks`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ meetingContext }),
+    });
+
+    const aiData = await res.json();
+
+    // 2️⃣ Summary DB me save karo
+    await fetch(`${server_url}/api/v1/meeting/save-summary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        token,
+        meetingCode,
+        meetingContext,
+        summary: aiData.summary,
+        actionItems: aiData.tasks,
+      }),
+    });
+
+    console.log("✅ Summary saved in DB");
+  } catch (err) {
+    console.log("❌ Summary save failed", err);
+  }
+};
+
+
 
 
 
@@ -561,10 +647,9 @@ const [aiLoading, setAiLoading] = useState(false);
 
                 <div className={styles.meetVideoContainer}>
 
-                    {showModal ? (
+{/* ================= ZOOM CHAT ONLY ================= */}
+{showModal ? (
   <div className={styles.chatRoom}>
-
-    {/* ================= ZOOM CHAT ================= */}
     <div className={styles.chatContainer}>
       <h2>💬 Meeting Chat</h2>
 
@@ -584,59 +669,83 @@ const [aiLoading, setAiLoading] = useState(false);
           label="Send message"
           fullWidth
         />
-        <Button variant="contained" onClick={sendMessage}>Send</Button>
+        <Button variant="contained" onClick={sendMessage}>
+          Send
+        </Button>
       </div>
     </div>
-
-   {/* ========== AI MEETING ASSISTANT ========== */}
-<div className={styles.aiChatBox}>
-  <div className={styles.aiHeader}>
-    🤖 AI Meeting Assistant
   </div>
+) : null}
 
-  <div className={styles.aiMessages} id="ai-scroll">
-    {aiMessages.length === 0 && (
-      <p className={styles.emptyText}>
-        Ask anything about the meeting...
-      </p>
-    )}
 
-    {aiMessages.map((msg, index) => (
-      <div
-        key={index}
-        className={
-          msg.sender === "You"
-            ? styles.userMsg
-            : styles.aiMsg
-        }
-      >
-        <b>{msg.sender}:</b>
-        <p>{msg.data}</p>
-      </div>
-    ))}
-
-    {aiLoading && (
-      <p className={styles.thinking}>
-        🤖 AI is thinking...
-      </p>
-    )}
-  </div>
-
-  <div className={styles.aiInputBox}>
-    <input
-      type="text"
-      placeholder="Ask AI something..."
-      value={aiInput}
-      onChange={(e) => setAiInput(e.target.value)}
-      onKeyDown={(e) => e.key === "Enter" && askAI()}
-    />
-    <button onClick={askAI}>ASK AI</button>
-  </div>
+{/* ================= AI FLOAT ICON ================= */}
+<div
+  className={styles.aiFab}
+  onClick={() => setAiOpen(true)}
+  title="Open AI Assistant"
+>
+  🤖
 </div>
 
 
+{/* ================= AI POPUP CHAT ================= */}
+{aiOpen && (
+ <div
+  className={styles.aiChatBox}
+  style={{
+    left: aiPos.x,
+    top: aiPos.y,
+    right: "auto",
+    bottom: "auto",
+  }}
+>
+
+   <div className={styles.aiHeader} onMouseDown={onAiMouseDown}>
+
+      🤖 AI Meeting Assistant
+
+      <button
+        className={styles.aiCloseBtn}
+        onClick={() => setAiOpen(false)}
+      >
+        ✖
+      </button>
+    </div>
+
+    <div className={styles.aiMessages} id="ai-scroll">
+      {aiMessages.length === 0 && (
+        <p className={styles.emptyText}>
+          Ask anything about the meeting...
+        </p>
+      )}
+
+      {aiMessages.map((msg, index) => (
+        <div
+          key={index}
+          className={msg.sender === "You" ? styles.userMsg : styles.aiMsg}
+        >
+          <b>{msg.sender}:</b>
+          <p>{msg.data}</p>
+        </div>
+      ))}
+
+      {aiLoading && (
+        <p className={styles.thinking}>🤖 AI is thinking...</p>
+      )}
+    </div>
+
+    <div className={styles.aiInputBox}>
+      <input
+        type="text"
+        placeholder="Ask AI something..."
+        value={aiInput}
+        onChange={(e) => setAiInput(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && askAI()}
+      />
+      <button onClick={askAI}>ASK</button>
+    </div>
   </div>
-) : null}
+)}
 
 
 

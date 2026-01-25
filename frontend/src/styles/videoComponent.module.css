@@ -135,11 +135,11 @@
   background: #020617;
 }
 
-/* ================= AI CHAT (FLOATING) ================= */
+/* ================= AI CHAT (FLOATING FIXED) ================= */
 
 .aiChatBox {
   position: fixed;
-  right: 20px;
+  right: 340px; /* ✅ zoom chat ke left side */
   bottom: 20px;
   width: 340px;
   height: 420px;
