@@ -1,3 +1,5 @@
+import { useNavigate } from "react-router-dom";
+import RestoreIcon from "@mui/icons-material/Restore";
 import React, { useEffect, useRef, useState } from 'react'
 import io from "socket.io-client";
 import { Badge, IconButton, TextField } from '@mui/material';
@@ -12,6 +14,10 @@ import ScreenShareIcon from '@mui/icons-material/ScreenShare';
 import StopScreenShareIcon from '@mui/icons-material/StopScreenShare'
 import ChatIcon from '@mui/icons-material/Chat'
 import server from '../environment';
+import axios from "axios";
+
+
+
 
 const server_url = server;
 
@@ -25,6 +31,9 @@ const peerConfigConnections = {
 
 export default function VideoMeetComponent() {
 
+    const navigate = useNavigate();
+
+    
     var socketRef = useRef();
     let socketIdRef = useRef();
 
@@ -432,16 +441,29 @@ const dragOffset = useRef({ x: 0, y: 0 });
         setScreen(!screen);
     }
 
-  let handleEndCall = async () => {
-  await saveSummaryToDB(); // ✅ meeting end pe summary save
+
+
+let handleEndCall = async () => {
+  console.log("📌 END CALL CLICKED");
 
   try {
-    let tracks = localVideoref.current.srcObject.getTracks();
-    tracks.forEach((track) => track.stop());
-  } catch (e) {}
+    await saveSummaryToDB();
+    console.log("✅ Summary saved");
+  } catch (err) {
+    console.log("❌ Summary save failed:", err);
+  }
 
-  window.location.href = "/home";
+  try {
+    const tracks = localVideoref.current?.srcObject?.getTracks();
+    tracks?.forEach((track) => track.stop());
+  } catch (e) {
+    console.log("Track stop error:", e);
+  }
+
+  navigate("/home"); // ✅ no reload
 };
+
+
 
 
     let openChat = () => {
@@ -579,8 +601,13 @@ useEffect(() => {
 
 
 const saveSummaryToDB = async () => {
+  console.log("🔥 saveSummaryToDB CALLED");
   try {
     const token = localStorage.getItem("token");
+    if (!token) {
+      console.log("❌ Token missing");
+      return;
+    }
 
     const meetingCode = window.location.pathname.replace("/", "");
 
@@ -589,37 +616,88 @@ const saveSummaryToDB = async () => {
         ? messages.map((m) => `${m.sender}: ${m.data}`).join("\n")
         : "No meeting messages yet.";
 
-    // 1️⃣ AI se summary + tasks lo
     const res = await fetch(`${server_url}/api/v1/ai/summarize-tasks`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ meetingContext }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, meetingContext }),
     });
 
     const aiData = await res.json();
 
-    // 2️⃣ Summary DB me save karo
-    await fetch(`${server_url}/api/v1/meeting/save-summary`, {
+    if (!res.ok) {
+      console.log("❌ AI summarize failed:", aiData);
+      return;
+    }
+
+    // ✅ tasks clean fix
+    let tasks = aiData?.tasks || [];
+
+    if (Array.isArray(tasks) && tasks.length === 1 && tasks[0] === "[]") {
+      tasks = [];
+    }
+    if (typeof tasks === "string" && tasks === "[]") {
+      tasks = [];
+    }
+
+    if (Array.isArray(tasks) && tasks.length === 1 && tasks[0].toLowerCase() === "none") {
+  tasks = [];
+}
+
+
+    const saveRes = await fetch(`${server_url}/api/v1/meeting/save-summary`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token,
         meetingCode,
         meetingContext,
-        summary: aiData.summary,
-        actionItems: aiData.tasks,
+        summary: aiData?.summary || "",
+        actionItems: tasks,
       }),
     });
 
-    console.log("✅ Summary saved in DB");
+    const saveData = await saveRes.json();
+
+    if (!saveRes.ok) {
+      console.log("❌ Save summary failed:", saveData);
+      return;
+    }
+
+    console.log("✅ Summary saved in DB:", saveData);
   } catch (err) {
     console.log("❌ Summary save failed", err);
   }
 };
+
+
+
+
+
+
+const generateSummary = async () => {
+  console.log("🔥 generateSummary CALLED");  // 👈 ye line add karo
+
+  try {
+    const meetingContext =
+      messages && messages.length > 0
+        ? messages.map((m) => `${m.sender}: ${m.data}`).join("\n")
+        : "No meeting messages yet.";
+
+    const res = await axios.post("http://localhost:8000/api/v1/ai/summarize", {
+      meetingCode: window.location.pathname.replace("/", ""),
+      meetingContext,
+    });
+
+    alert("✅ Summary Saved Successfully!");
+    console.log(res.data);
+  } catch (err) {
+    console.log(err);
+    alert("❌ Summary was not generated.");
+  }
+};
+
+
+
 
 
 
@@ -750,38 +828,45 @@ const saveSummaryToDB = async () => {
 
 
 
+<div className={styles.buttonContainers}>
+
+  <IconButton onClick={handleVideo}>
+    {video ? <VideocamIcon /> : <VideocamOffIcon />}
+  </IconButton>
+
+  <IconButton onClick={handleEndCall} className={styles.endCall}>
+    <CallEndIcon />
+  </IconButton>
+
+  <IconButton onClick={handleAudio}>
+    {audio ? <MicIcon /> : <MicOffIcon />}
+  </IconButton>
+
+  {screenAvailable && (
+    <IconButton onClick={handleScreen}>
+      {screen ? <ScreenShareIcon /> : <StopScreenShareIcon />}
+    </IconButton>
+  )}
+
+  {/* ✅ SUMMARY BUTTON */}
+  <IconButton onClick={generateSummary}>
+    <RestoreIcon />
+  </IconButton>
+
+  {/* ✅ HISTORY BUTTON */}
+  <IconButton onClick={() => navigate("/history")}>
+    <RestoreIcon />
+  </IconButton>
+
+  <Badge badgeContent={newMessages} max={999} color="error">
+    <IconButton onClick={() => setModal(!showModal)}>
+      <ChatIcon />
+    </IconButton>
+  </Badge>
+
+</div>
 
 
-                <div className={styles.buttonContainers}>
-
-                    <IconButton onClick={handleVideo}>
-                        {video ? <VideocamIcon /> : <VideocamOffIcon />}
-                    </IconButton>
-
-                    <IconButton
-                        onClick={handleEndCall}
-                        className={styles.endCall}
-                    >
-                        <CallEndIcon />
-                    </IconButton>
-
-                    <IconButton onClick={handleAudio}>
-                        {audio ? <MicIcon /> : <MicOffIcon />}
-                    </IconButton>
-
-                    {screenAvailable && (
-                        <IconButton onClick={handleScreen}>
-                         {screen ? <ScreenShareIcon /> : <StopScreenShareIcon />}
-                        </IconButton>
-                    )}
-
-                    <Badge badgeContent={newMessages} max={999} color="error">
-                        <IconButton onClick={() => setModal(!showModal)}>
-                            <ChatIcon />
-                        </IconButton>
-                    </Badge>
-
-                </div>
 
 
 

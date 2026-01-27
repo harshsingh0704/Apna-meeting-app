@@ -2,6 +2,9 @@ import { Meeting } from "../models/meeting.model.js";
 import { User } from "../models/user.model.js";
 
 export const saveMeetingSummary = async (req, res) => {
+  console.log("🔥 /api/v1/meeting/save-summary HIT");
+  console.log("BODY =>", req.body);
+
   try {
     const { token, meetingCode, meetingContext, summary, actionItems } = req.body;
 
@@ -15,18 +18,43 @@ export const saveMeetingSummary = async (req, res) => {
     }
 
     // find meeting
-    const meeting = await Meeting.findOne({
-      user_id: user.username,
-      meetingCode,
-    });
+   const meeting = await Meeting.findOne({
+  user_id: user.username,
+  meetingCode,
+}).sort({ date: -1 }); // ✅ latest meeting pick
+
 
     if (!meeting) {
       return res.status(404).json({ message: "Meeting not found in history" });
     }
 
+    // ✅ Update meeting data
     meeting.meetingContext = meetingContext || meeting.meetingContext;
     meeting.summary = summary || meeting.summary;
-    meeting.actionItems = actionItems || meeting.actionItems;
+
+    // ✅ actionItems fix (handles ["[]"], "[]", array)
+    let fixedActionItems = [];
+
+    if (Array.isArray(actionItems)) {
+      // case: ["[]"] -> treat as empty
+      if (actionItems.length === 1 && actionItems[0] === "[]") {
+        fixedActionItems = [];
+      } else {
+        fixedActionItems = actionItems;
+      }
+    } else if (typeof actionItems === "string") {
+      // case: "[]"
+      try {
+        const parsed = JSON.parse(actionItems);
+        fixedActionItems = Array.isArray(parsed) ? parsed : [];
+      } catch (err) {
+        fixedActionItems = [];
+      }
+    } else {
+      fixedActionItems = meeting.actionItems || [];
+    }
+
+    meeting.actionItems = fixedActionItems;
 
     await meeting.save();
 
