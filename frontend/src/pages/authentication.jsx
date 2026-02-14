@@ -43,7 +43,14 @@ const Authentication = () => {
         setPassword("");
       }
     } catch (err) {
-      setError(err?.response?.data?.message || "Something went wrong");
+      const errorMessage = err?.response?.data?.message || err?.message || "Something went wrong";
+      
+      // Network/CORS errors ko better handle karo
+      if (err?.code === "ERR_NETWORK" || err?.message?.includes("Network Error")) {
+        setError("Backend server is not running. Please start the backend server.");
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }

@@ -9,6 +9,10 @@ const meetingSchema = new Schema({
   meetingContext: { type: String, default: "" },
   summary: { type: String, default: "" },
   actionItems: { type: [String], default: [] },
+  decisions: { type: [String], default: [] },
+  // ✅ Recording data (optional)
+  recordingUrl: { type: String, default: "" },
+  recordingDuration: { type: Number, default: 0 },
 });
 
 const Meeting = mongoose.model("Meeting", meetingSchema);

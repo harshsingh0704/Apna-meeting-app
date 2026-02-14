@@ -18,6 +18,7 @@ import {
 import RestoreIcon from "@mui/icons-material/Restore";
 import VideoCallIcon from "@mui/icons-material/VideoCall";
 import LogoutIcon from "@mui/icons-material/Logout";
+import EventIcon from "@mui/icons-material/Event";
 import AddIcon from "@mui/icons-material/Add";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
@@ -53,7 +54,7 @@ function HomeComponent() {
   const handleJoinVideoCall = async () => {
     if (!meetingCode) return;
     await addToUserHistory(meetingCode);
-    navigate(`/${meetingCode}`);
+  navigate(`/meet/${meetingCode}`);
   };
 
   /* 🎨 Theme */
@@ -92,6 +93,9 @@ function HomeComponent() {
             <IconButton onClick={() => navigate("/history")}>
               <RestoreIcon />
             </IconButton>
+
+            <Button onClick={() => navigate("/calendar")}>Calendar</Button>
+            <Button onClick={() => navigate("/workspaces")}>Workspaces</Button>
 
             <Button
               startIcon={<LogoutIcon />}

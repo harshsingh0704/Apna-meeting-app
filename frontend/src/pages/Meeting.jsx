@@ -1,5 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
+import server from "../environment";
 
 const Meeting = () => {
   const [messages, setMessages] = useState([]);
@@ -20,7 +21,7 @@ const Meeting = () => {
         .join("\n");
 
       const res = await axios.post(
-        "http://localhost:8000/api/v1/ai/ask",
+        `${server}/api/v1/ai/ask`,
         {
           question: input,
           meetingContext,

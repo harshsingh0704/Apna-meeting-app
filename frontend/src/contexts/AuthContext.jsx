@@ -1,6 +1,6 @@
 import axios from "axios";
 import httpStatus from "http-status";
-import { createContext, useState } from "react";
+import { createContext, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import server from "../environment";
 
@@ -12,8 +12,32 @@ const client = axios.create({
 
 export const AuthProvider = ({ children }) => {
   const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    const fetchUser = async () => {
+      const token = localStorage.getItem("token");
+      if (token) {
+        try {
+          const res = await client.get("/me", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          setUserData(res.data);
+        } catch (error) {
+          console.error("Failed to fetch user", error);
+          // Token might be invalid, so clear it
+          localStorage.removeItem("token");
+        }
+      }
+      setLoading(false);
+    };
+
+    fetchUser();
+  }, []);
+  
   // ✅ REGISTER
   const handleRegister = async (name, username, password) => {
     try {
@@ -85,15 +109,24 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    setUserData(null);
+    navigate("/auth");
+  };
+
   return (
     <AuthContext.Provider
       value={{
         userData,
+        loading,
         setUserData,
+        token: localStorage.getItem("token"),
         handleRegister,
         handleLogin,
         getHistoryOfUser,
         addToUserHistory,
+        handleLogout,
       }}
     >
       {children}

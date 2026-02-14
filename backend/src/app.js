@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-dotenv.config(); // 👈 sabse pehle
+dotenv.config();
 
 import express from "express";
 import { createServer } from "node:http";
@@ -8,22 +8,15 @@ import cors from "cors";
 
 import { connectToSocket } from "./controllers/socketManager.js";
 import userRoutes from "./routes/users.routes.js";
-
-/* ===================== AI ROUTES IMPORT ===================== */
 import aiRoutes from "./routes/ai.routes.js";
-/* ============================================================ */
-
-
-
-
 import meetingRoutes from "./routes/meeting.routes.js";
-
-
-
-
+import taskRoutes from "./routes/task.routes.js";
+import workspaceRoutes from "./routes/workspace.routes.js";
+import calendarRoutes from "./routes/calendar.routes.js";
 
 const app = express();
 const server = createServer(app);
+
 connectToSocket(server);
 
 app.set("port", process.env.PORT || 8000);
@@ -32,32 +25,28 @@ app.use(cors());
 app.use(express.json({ limit: "40kb" }));
 app.use(express.urlencoded({ limit: "40kb", extended: true }));
 
-/* ===================== USER ROUTES ===================== */
 app.use("/api/v1/users", userRoutes);
-/* ====================================================== */
-
-/* ===================== AI ROUTES ===================== */
 app.use("/api/v1/ai", aiRoutes);
-/* 👉 AI endpoint example:
-   POST http://localhost:8000/api/v1/ai/ask
-*/
-/* ==================================================== */
-
-
-
 app.use("/api/v1/meeting", meetingRoutes);
+app.use("/api/v1/tasks", taskRoutes);
+app.use("/api/v1/workspaces", workspaceRoutes);
+app.use("/api/v1/calendar", calendarRoutes);
 
-
-
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "OK",
+    message: "Server is up and running",
+  });
+});
 
 const start = async () => {
   try {
-    console.log("MONGO_URI =>", process.env.MONGO_URI); // 🔍 debug
-
-    const connectionDb = await mongoose.connect(process.env.MONGO_URI);
+    const connectionDb = await mongoose.connect(process.env.MONGO_URI, {
+      dbName: 'zoomdb' // Explicitly set database name (lowercase) to match existing database
+    });
 
     console.log(
-      `✅ MONGO Connected DB Host: ${connectionDb.connection.host}`
+      `✅ MONGO Connected DB Host: ${connectionDb.connection.host}, Database: ${connectionDb.connection.name}`
     );
 
     server.listen(app.get("port"), () => {
@@ -65,6 +54,7 @@ const start = async () => {
     });
   } catch (error) {
     console.error("❌ Mongo connection failed:", error.message);
+    process.exit(1);
   }
 };
 
