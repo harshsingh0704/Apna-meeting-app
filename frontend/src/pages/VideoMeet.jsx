@@ -14,6 +14,7 @@ import ScreenShareIcon from '@mui/icons-material/ScreenShare';
 import StopScreenShareIcon from '@mui/icons-material/StopScreenShare'
 import ChatIcon from '@mui/icons-material/Chat'
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import StopIcon from '@mui/icons-material/Stop';
 import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver';
@@ -80,6 +81,15 @@ const [aiMessages, setAiMessages] = useState([]);
 const [aiInput, setAiInput] = useState("");
 const [aiLoading, setAiLoading] = useState(false);
 const [aiOpen, setAiOpen] = useState(false);
+const [confusionResults, setConfusionResults] = useState({
+  unclear: [],
+  disagreements: [],
+  risks: [],
+  missingInformation: [],
+});
+const [confusionMeta, setConfusionMeta] = useState({ source: "", warning: "", raw: "" });
+const [confusionLoading, setConfusionLoading] = useState(false);
+const [showConfusionPanel, setShowConfusionPanel] = useState(false);
 // =================================================
 
 const [aiPos, setAiPos] = useState({ x: 60, y: 120 });
@@ -587,39 +597,28 @@ const saveRecordingToServer = async (blob) => {
     const meetingCode = getMeetingCodeFromPath();
     const duration = recordingTime;
 
-    // Convert blob to base64 for simple storage (for MVP)
-    // In production, upload to cloud storage (S3, Cloudinary, etc.)
-    const reader = new FileReader();
-    reader.readAsDataURL(blob);
-    
-    reader.onloadend = async () => {
-      const base64Recording = reader.result;
-      
-      // For now, we'll store as data URL. In production, upload to cloud storage
-      const recordingUrl = base64Recording; // Or upload to S3/Cloudinary and get URL
-      
-      const res = await fetch(`${server_url}/api/v1/meeting/save-recording`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          meetingCode,
-          recordingUrl,
-          recordingDuration: duration,
-        }),
-      });
+    // Create FormData to send the blob
+    const formData = new FormData();
+    formData.append('recording', blob, `meeting_${meetingCode}_${Date.now()}.webm`);
+    formData.append('meetingCode', meetingCode);
+    formData.append('recordingDuration', duration);
 
-      const data = await res.json();
-      
-      if (res.ok) {
-        alert(`✅ Recording saved! Duration: ${formatTime(duration)}`);
-        console.log("Recording saved:", data);
-      } else {
-        alert("❌ Failed to save recording: " + (data.message || "Unknown error"));
-      }
-    };
+    const res = await fetch(`${server_url}/api/v1/meeting/save-recording`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    const data = await res.json();
+    
+    if (res.ok) {
+      alert(`✅ Recording uploaded to cloud! Duration: ${formatTime(duration)}`);
+      console.log("Recording saved:", data);
+    } else {
+      alert("❌ Failed to save recording: " + (data.message || "Unknown error"));
+    }
   } catch (err) {
     console.error("Save recording error:", err);
     alert("❌ Failed to save recording");
@@ -930,6 +929,60 @@ useEffect(() => {
 
 
 
+const parseTasksFromText = (text) => {
+  if (!text || typeof text !== "string") return [];
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => line.replace(/^[-*\d\.\)\s]+/, "").trim())
+    .filter(Boolean);
+};
+
+const normalizeExtractedTasks = (rawTasks) => {
+  if (!rawTasks) return [];
+
+  let tasksList = rawTasks;
+  if (typeof tasksList === "string") {
+    const trimmed = tasksList.trim();
+    if (!trimmed || trimmed === "[]" || trimmed.toLowerCase() === "none") return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        tasksList = parsed;
+      }
+    } catch {
+      tasksList = parseTasksFromText(trimmed);
+    }
+  }
+
+  if (typeof tasksList === "object" && !Array.isArray(tasksList)) {
+    if (tasksList.tasks || tasksList.actionItems || tasksList.items) {
+      tasksList = tasksList.tasks || tasksList.actionItems || tasksList.items;
+    }
+  }
+
+  if (typeof tasksList === "string") {
+    tasksList = parseTasksFromText(tasksList);
+  }
+
+  if (!Array.isArray(tasksList)) return [];
+
+  return tasksList
+    .map((task) => {
+      if (!task) return null;
+      if (typeof task === "object") {
+        return (
+          task.taskTitle || task.title || task.description || task.name ||
+          task.action || task.text || JSON.stringify(task)
+        );
+      }
+      return String(task).trim();
+    })
+    .filter(Boolean);
+};
+
 const saveSummaryToDB = async () => {
   console.log("🔥 saveSummaryToDB CALLED");
   try {
@@ -954,6 +1007,11 @@ const saveSummaryToDB = async () => {
         ? (chatPart + transcriptPart).trim()
         : "No meeting messages yet.";
 
+    if (!meetingContext || meetingContext === "No meeting messages yet.") {
+      alert("Please start the meeting or enable live transcript before generating tasks.");
+      return;
+    }
+
     const res = await fetch(`${server_url}/api/v1/ai/summarize-tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -967,22 +1025,14 @@ const saveSummaryToDB = async () => {
       return;
     }
 
-    // ✅ tasks clean fix
-    let tasksList = aiData?.tasks || [];
-
-    if (Array.isArray(tasksList) && tasksList.length === 1 && tasksList[0] === "[]") {
-      tasksList = [];
+    let tasksList = normalizeExtractedTasks(aiData?.tasks || aiData?.actionItems || aiData?.task || aiData?.taskItems);
+    if (tasksList.length === 0 && typeof aiData?.summary === "string") {
+      const fallbackTasks = normalizeExtractedTasks(aiData.summary);
+      if (fallbackTasks.length > 0) {
+        tasksList = fallbackTasks;
+      }
     }
-    if (typeof tasksList === "string" && tasksList === "[]") {
-      tasksList = [];
-    }
-
-    if (Array.isArray(tasksList) && tasksList.length === 1 && tasksList[0].toLowerCase() === "none") {
-      tasksList = [];
-    }
-
-    let decisionsList = aiData?.decisions || [];
-    if (!Array.isArray(decisionsList)) decisionsList = [];
+    const decisionsList = Array.isArray(aiData?.decisions) ? aiData.decisions : [];
 
     setTasks(tasksList);
 
@@ -1031,14 +1081,22 @@ const generateSummary = async () => {
     const meetingContext =
       (chatPart || transcriptPart) ? (chatPart + transcriptPart).trim() : "No meeting messages yet.";
 
+    if (!meetingContext || meetingContext === "No meeting messages yet.") {
+      alert("Please start the meeting or enable live transcript before generating tasks.");
+      return;
+    }
+
     const res = await axios.post(`${server_url}/api/v1/ai/summarize-tasks`, {
       meetingContext,
     });
 
     const aiData = res.data;
-    let tasksList = aiData?.tasks || [];
-    if (Array.isArray(tasksList) && tasksList.length === 1 && (tasksList[0] === "[]" || tasksList[0]?.toLowerCase() === "none")) {
-      tasksList = [];
+    let tasksList = normalizeExtractedTasks(aiData?.tasks || aiData?.actionItems || aiData?.task || aiData?.taskItems);
+    if (tasksList.length === 0 && typeof aiData?.summary === "string") {
+      const fallbackTasks = normalizeExtractedTasks(aiData.summary);
+      if (fallbackTasks.length > 0) {
+        tasksList = fallbackTasks;
+      }
     }
     setTasks(tasksList);
 
@@ -1066,6 +1124,56 @@ const generateSummary = async () => {
     console.log(err);
     alert("❌ Summary was not generated.");
   }
+};
+
+const detectConfusionRisks = async () => {
+  try {
+    setConfusionLoading(true);
+    setShowConfusionPanel(true);
+
+    const chatPart =
+      messages && messages.length > 0
+        ? messages.map((m) => `${m.sender}: ${m.data}`).join("\n")
+        : "";
+    const transcriptPart =
+      liveTranscript.length > 0 ? "\n[Live transcript]\n" + liveTranscript.join("\n") : "";
+    const meetingContext =
+      (chatPart || transcriptPart) ? (chatPart + transcriptPart).trim() : "No meeting messages yet.";
+
+    const res = await axios.post(`${server_url}/api/v1/ai/detect-confusion`, {
+      meetingContext,
+    });
+
+    const data = res.data || {};
+    setConfusionResults({
+      unclear: Array.isArray(data.unclear) ? data.unclear : [],
+      disagreements: Array.isArray(data.disagreements) ? data.disagreements : [],
+      risks: Array.isArray(data.risks) ? data.risks : [],
+      missingInformation: Array.isArray(data.missingInformation) ? data.missingInformation : [],
+    });
+    setConfusionMeta({
+      source: data.source || "",
+      warning: data.warning || "",
+      raw: data.raw || "",
+    });
+  } catch (err) {
+    console.log(err);
+    alert("❌ Confusion / risk detection failed.");
+    setConfusionResults({ unclear: [], disagreements: [], risks: [], missingInformation: [] });
+    setConfusionMeta({ source: "", warning: "", raw: "" });
+  } finally {
+    setConfusionLoading(false);
+  }
+};
+
+const renderConfusionText = (item) => {
+  if (typeof item === "string") {
+    return item || "No details available.";
+  }
+  if (item && typeof item === "object") {
+    return item.statement || item.text || item.sourceLine || JSON.stringify(item);
+  }
+  return "No details available.";
 };
 
 
@@ -1144,8 +1252,10 @@ const generateSummary = async () => {
   <div className={styles.chatRoom}>
     <div className={styles.chatContainer}>
       <div className={styles.chatHeader}>
-        <h2>Meeting Chat</h2>
-        <p className={styles.chatSubTitle}>Messages in this meeting</p>
+        <div>
+          <h2>Message</h2>
+          <p className={styles.chatSubTitle}>Meeting Chat</p>
+        </div>
       </div>
 
       <div className={styles.chattingDisplay}>
@@ -1156,14 +1266,15 @@ const generateSummary = async () => {
             </div>
             <div className={styles.chatBubble}>{item.data}</div>
           </div>
-        )) : <p>No Messages Yet</p>}
+        )) : <p className={styles.noMessagesText}>No messages yet — start the conversation.</p>}
       </div>
 
       <div className={styles.chattingArea}>
         <TextField
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          label="Send message"
+          label="Type your message"
+          placeholder="Write something for the meeting..."
           fullWidth
           size="small"
           sx={{
@@ -1199,7 +1310,14 @@ const generateSummary = async () => {
 <div
   className={styles.aiFab}
   onClick={() => setAiOpen(true)}
-  title="Open AI Assistant"
+  onMouseDown={onAiMouseDown}
+  title="Open AI Assistant (drag to move)"
+  style={{
+    left: aiPos.x,
+    top: aiPos.y,
+    right: "auto",
+    bottom: "auto",
+  }}
 >
   🤖
 </div>
@@ -1219,7 +1337,7 @@ const generateSummary = async () => {
 
    <div className={styles.aiHeader} onMouseDown={onAiMouseDown}>
 
-      🤖 AI Meeting Assistant
+      ✨ Meeting Buddy
 
       <button
         className={styles.aiCloseBtn}
@@ -1232,7 +1350,7 @@ const generateSummary = async () => {
     <div className={styles.aiMessages} id="ai-scroll">
       {aiMessages.length === 0 && (
         <p className={styles.emptyText}>
-          Ask anything about the meeting...
+          Hi there! Ask me about this meeting, tasks, or next steps.
         </p>
       )}
 
@@ -1247,14 +1365,14 @@ const generateSummary = async () => {
       ))}
 
       {aiLoading && (
-        <p className={styles.thinking}>🤖 AI is thinking...</p>
+        <p className={styles.thinking}>🤖 One moment, your meeting buddy is processing that...</p>
       )}
     </div>
 
     <div className={styles.aiInputBox}>
       <input
         type="text"
-        placeholder="Ask AI something..."
+        placeholder="Ask your meeting question or request a quick summary..."
         value={aiInput}
         onChange={(e) => setAiInput(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && askAI()}
@@ -1312,7 +1430,7 @@ const generateSummary = async () => {
 
       {/* ================= FACE EMOTION ================= */}
       {faceEmotionEnabled && (
-        <div className={styles.transcriptPanel} style={{ left: 20, top: 250, maxHeight: 100 }}>
+        <div className={`${styles.transcriptPanel} ${styles.emotionPanel}`} style={{ left: 20, top: 250, maxHeight: 120 }}>
           <div className={styles.transcriptHeader}>
             <span>😊 Face emotion</span>
             <button
@@ -1350,9 +1468,71 @@ const generateSummary = async () => {
             ) : (
               <ul className={styles.taskList}>
                 {tasks.map((task, idx) => (
-                  <li key={idx}>{task}</li>
+                  <li key={idx}>{typeof task === 'string' ? task : task.taskTitle || task.title || task.description || JSON.stringify(task)}</li>
                 ))}
               </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showConfusionPanel && (
+        <div className={styles.aiChatBox} style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 640, maxHeight: 520, overflowY: 'auto' }}>
+          <div className={styles.aiHeader}>
+            <span>⚠️ Confusion / Risk Detection</span>
+            <button className={styles.aiCloseBtn} onClick={() => setShowConfusionPanel(false)}>
+              ✖
+            </button>
+          </div>
+          <div className={styles.aiMessages}>
+            {confusionLoading ? (
+              <p className={styles.emptyText}>Detecting confusion, disagreements, risks, and missing information…</p>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12, fontSize: 13, color: "#94a3b8" }}>
+                  Source: {confusionMeta.source || "local"}
+                  {confusionMeta.warning ? ` • ${confusionMeta.warning}` : ""}
+                </div>
+                {[
+                  ["Unclear statements", confusionResults.unclear],
+                  ["Disagreements", confusionResults.disagreements],
+                  ["Risks", confusionResults.risks],
+                  ["Missing information", confusionResults.missingInformation],
+                ].map(([title, items]) => (
+                  <div key={title} style={{ marginBottom: 16 }}>
+                    <h4 style={{ marginBottom: 8 }}>{title}</h4>
+                    {items.length === 0 ? (
+                      <p className={styles.emptyText}>No items detected.</p>
+                    ) : (
+                      <ul className={styles.taskList}>
+                        {items.map((item, idx) => (
+                          <li key={`${title}-${idx}`}>
+                            {typeof item === "object" ? (
+                              <>
+                                <strong>{item.speaker || "Unknown"}</strong>: {renderConfusionText(item)}
+                                {item.timestamp ? ` (${item.timestamp})` : ""}
+                              </>
+                            ) : (
+                              renderConfusionText(item)
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+                {confusionResults.unclear.length === 0 &&
+                  confusionResults.disagreements.length === 0 &&
+                  confusionResults.risks.length === 0 &&
+                  confusionResults.missingInformation.length === 0 && (
+                    <details style={{ color: "#94a3b8", marginTop: 12 }}>
+                      <summary style={{ cursor: "pointer" }}>Show raw AI response</summary>
+                      <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, color: "#e2e8f0" }}>
+                        {confusionMeta.raw || "No raw response available."}
+                      </pre>
+                    </details>
+                  )}
+              </>
             )}
           </div>
         </div>
@@ -1400,24 +1580,52 @@ const generateSummary = async () => {
   </IconButton>
 
   {/* ✅ RECORDING BUTTON (Free for all) */}
-  <IconButton 
+  <Button
+    variant="contained"
     onClick={isRecording ? stopRecording : startRecording}
+    startIcon={isRecording ? <StopIcon /> : <FiberManualRecordIcon />}
     sx={{
-      color: isRecording ? "#ff4444" : "inherit",
-      animation: isRecording ? "pulse 1.5s infinite" : "none",
-      "@keyframes pulse": {
-        "0%, 100%": { opacity: 1 },
-        "50%": { opacity: 0.5 },
+      minWidth: 140,
+      textTransform: "none",
+      fontWeight: 800,
+      letterSpacing: "0.3px",
+      background: isRecording 
+        ? "linear-gradient(135deg, #dc2626, #ef4444)" 
+        : "linear-gradient(135deg, #2563eb, #0ea5e9)",
+      color: "white",
+      border: "1px solid " + (isRecording ? "rgba(239, 68, 68, 0.3)" : "rgba(37, 99, 235, 0.3)"),
+      borderRadius: "12px",
+      padding: "10px 18px",
+      boxShadow: isRecording
+        ? "0 10px 24px rgba(220, 38, 38, 0.25)"
+        : "0 10px 24px rgba(37, 99, 235, 0.25)",
+      transition: "all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)",
+      "&:hover": {
+        background: isRecording 
+          ? "linear-gradient(135deg, #b91c1c, #dc2626)" 
+          : "linear-gradient(135deg, #1d4ed8, #0993c6)",
+        transform: "translateY(-3px)",
+        boxShadow: isRecording
+          ? "0 14px 32px rgba(220, 38, 38, 0.35)"
+          : "0 14px 32px rgba(37, 99, 235, 0.35)",
+      },
+      "&:active": {
+        transform: "translateY(-1px)",
       },
     }}
     title={isRecording ? `Recording... ${formatTime(recordingTime)}` : "Start Recording"}
   >
-    {isRecording ? <StopIcon /> : <FiberManualRecordIcon />}
-  </IconButton>
+    {isRecording ? `Stop (${formatTime(recordingTime)})` : "Record"}
+  </Button>
 
   {/* ✅ SUMMARY BUTTON */}
   <IconButton onClick={generateSummary}>
     <RestoreIcon />
+  </IconButton>
+
+  {/* ✅ CONFUSION / RISK DETECTION */}
+  <IconButton onClick={detectConfusionRisks} disabled={confusionLoading} title="Detect confusion / risks">
+    <WarningAmberIcon />
   </IconButton>
 
   {/* ✅ HISTORY BUTTON */}

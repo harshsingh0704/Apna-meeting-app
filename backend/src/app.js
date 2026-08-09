@@ -5,6 +5,7 @@ import express from "express";
 import { createServer } from "node:http";
 import mongoose from "mongoose";
 import cors from "cors";
+import cloudinary from "cloudinary";
 
 import { connectToSocket } from "./controllers/socketManager.js";
 import userRoutes from "./routes/users.routes.js";
@@ -13,6 +14,13 @@ import meetingRoutes from "./routes/meeting.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import workspaceRoutes from "./routes/workspace.routes.js";
 import calendarRoutes from "./routes/calendar.routes.js";
+
+// Configure Cloudinary
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "duyeh8krp",
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const app = express();
 const server = createServer(app);

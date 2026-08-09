@@ -556,7 +556,46 @@ export default function History() {
                           : "Unknown"}
                       </b>
                     </Typography>
+                    <Box sx={{ display: "flex", gap: 1, mb: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<DownloadIcon />}
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = e.recordingUrl;
+                          link.download = `meeting_${e.meetingCode}.webm`;
+                          link.click();
+                        }}
+                        sx={{
+                          color: "#93C5FD",
+                          borderColor: "rgba(51,65,85,0.8)",
+                          "&:hover": { borderColor: "#60A5FA", bgcolor: "rgba(37,99,235,0.08)" },
+                        }}
+                      >
+                        Download
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => {
+                          const video = document.querySelector(`#video-${e._id}`);
+                          if (video) {
+                            video.scrollIntoView({ behavior: 'smooth' });
+                            video.play();
+                          }
+                        }}
+                        sx={{
+                          color: "#86EFAC",
+                          borderColor: "rgba(51,65,85,0.8)",
+                          "&:hover": { borderColor: "#4ADE80", bgcolor: "rgba(34,197,94,0.08)" },
+                        }}
+                      >
+                        Play
+                      </Button>
+                    </Box>
                     <video
+                      id={`video-${e._id}`}
                       controls
                       src={e.recordingUrl}
                       style={{

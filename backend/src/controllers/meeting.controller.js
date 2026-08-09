@@ -1,4 +1,5 @@
 import { Meeting } from "../models/meeting.model.js";
+import cloudinary from "cloudinary";
 
 // ✅ Save AI-generated meeting summary & tasks
 export const saveMeetingSummary = async (req, res) => {
@@ -87,20 +88,39 @@ export const saveMeetingSummary = async (req, res) => {
 export const saveMeetingRecording = async (req, res) => {
   console.log("🔥 /api/v1/meeting/save-recording HIT");
   console.log("BODY =>", req.body);
+  console.log("FILE =>", req.file ? "File received" : "No file");
 
   try {
-    const { meetingCode, recordingUrl, recordingDuration } = req.body;
+    const { meetingCode, recordingDuration } = req.body;
 
-    if (!meetingCode || !recordingUrl) {
+    if (!meetingCode || !req.file) {
       return res
         .status(400)
-        .json({ message: "meetingCode and recordingUrl are required" });
+        .json({ message: "meetingCode and recording file are required" });
     }
 
     const username = req.user?.username;
     if (!username) {
       return res.status(401).json({ message: "Unauthorized" });
     }
+
+    // Upload to Cloudinary
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.v2.uploader.upload_stream(
+        {
+          resource_type: 'video',
+          folder: 'meeting-recordings',
+          public_id: `${username}_${meetingCode}_${Date.now()}`,
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      stream.end(req.file.buffer);
+    });
+
+    const recordingUrl = uploadResult.secure_url;
 
     const meeting = await Meeting.findOne({
       user_id: username,
